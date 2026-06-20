@@ -30,4 +30,6 @@ export type ResolveVideoOptions = {
   referer?: string;
   /** 覆盖 WebView userAgent，空则使用 WebView 默认值 */
   userAgent?: string;
+  /** 为 true 时显示 WebView 便于调试嗅探过程，默认隐藏 */
+  debug?: boolean;
 };

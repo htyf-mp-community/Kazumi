@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -35,7 +35,7 @@ import {
 type RuleSearchStatus = SearchAllResult['status'] | 'pending';
 
 function pickDefaultRuleTab(
-  results: SearchAllResult[],
+  results: (SearchAllResult | undefined)[],
   rules: PluginRule[],
   activeRule: PluginRule | null,
 ): number {
@@ -45,7 +45,7 @@ function pickDefaultRuleTab(
   if (activeIndex >= 0 && results[activeIndex]?.status === 'success') {
     return activeIndex;
   }
-  const firstSuccess = results.findIndex((result) => result.status === 'success');
+  const firstSuccess = results.findIndex((result) => result?.status === 'success');
   if (firstSuccess >= 0) {
     return firstSuccess;
   }
@@ -94,10 +94,11 @@ export function InfoScreen() {
   const [bangumi, setBangumi] = useState<BangumiItem>(route.params.bangumi);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [sourceVisible, setSourceVisible] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchRunning, setSearchRunning] = useState(false);
   const [roadLoading, setRoadLoading] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchAllResult[]>([]);
+  const [searchResults, setSearchResults] = useState<(SearchAllResult | undefined)[]>([]);
   const [ruleTabIndex, setRuleTabIndex] = useState(0);
+  const searchSessionRef = useRef(0);
 
   const cover = getBangumiCover(bangumi);
   const title = getDisplayName(bangumi);
@@ -129,17 +130,42 @@ export function InfoScreen() {
     if (!keyword || installedRules.length === 0) {
       return;
     }
-    setSearchLoading(true);
+    const session = ++searchSessionRef.current;
+    let firstSuccessHandled = false;
+
+    setSearchRunning(true);
     setSearchResults([]);
+
     try {
-      const results = await getRuleEngine().searchAll(installedRules, keyword);
-      setSearchResults(results);
-      setRuleTabIndex(pickDefaultRuleTab(results, installedRules, activeRule));
+      await getRuleEngine().searchAll(installedRules, keyword, (result, index) => {
+        if (session !== searchSessionRef.current) {
+          return;
+        }
+
+        const isFirstSuccess = result.status === 'success' && !firstSuccessHandled;
+        if (isFirstSuccess) {
+          firstSuccessHandled = true;
+          setSearchRunning(false);
+        }
+
+        setSearchResults((prev) => {
+          const next = [...prev];
+          next[index] = result;
+          if (isFirstSuccess) {
+            setRuleTabIndex(pickDefaultRuleTab(next, installedRules, activeRule));
+          }
+          return next;
+        });
+      });
     } catch (error) {
-      Alert.alert('选源失败', String(error));
-      setSearchResults([]);
+      if (session === searchSessionRef.current) {
+        Alert.alert('选源失败', String(error));
+        setSearchResults([]);
+      }
     } finally {
-      setSearchLoading(false);
+      if (session === searchSessionRef.current) {
+        setSearchRunning(false);
+      }
     }
   }, [activeRule, getRuleEngine, installedRules, searchKeyword]);
 
@@ -196,10 +222,10 @@ export function InfoScreen() {
   const selectedRule = installedRules[ruleTabIndex] ?? null;
   const selectedResult = searchResults[ruleTabIndex];
   const selectedSources = selectedResult?.response?.data ?? [];
-  const selectedStatus: RuleSearchStatus = searchLoading
-    ? 'pending'
-    : (selectedResult?.status ?? 'pending');
-  const hasAnySuccess = searchResults.some((result) => result.status === 'success');
+  const selectedStatus: RuleSearchStatus =
+    selectedResult?.status ?? (searchRunning ? 'pending' : 'noResult');
+  const hasAnySuccess = searchResults.some((result) => result?.status === 'success');
+  const showGlobalSearchLoading = searchRunning && !hasAnySuccess;
 
   return (
     <View style={styles.root}>
@@ -271,9 +297,8 @@ export function InfoScreen() {
               contentContainerStyle={styles.ruleTabs}>
               {installedRules.map((rule, index) => {
                 const active = index === ruleTabIndex;
-                const status: RuleSearchStatus = searchLoading
-                  ? 'pending'
-                  : (searchResults[index]?.status ?? 'pending');
+                const status: RuleSearchStatus =
+                  searchResults[index]?.status ?? (searchRunning ? 'pending' : 'noResult');
                 return (
                   <Pressable
                     key={rule.name}
@@ -290,10 +315,10 @@ export function InfoScreen() {
               })}
             </ScrollView>
           </View>
-          {searchLoading ? (
+          {showGlobalSearchLoading ? (
             <View style={styles.modalLoading}>
               <ActivityIndicator color={colors.primary} />
-              <Text style={styles.modalLoadingText}>正在搜索全部规则…</Text>
+              <Text style={styles.modalLoadingText}>正在搜索视频源…</Text>
             </View>
           ) : null}
           {roadLoading ? (
@@ -322,7 +347,7 @@ export function InfoScreen() {
                   </Pressable>
                 ))
               : null}
-            {!searchLoading && selectedStatus !== 'success' ? (
+            {!showGlobalSearchLoading && selectedStatus !== 'success' ? (
               <View style={styles.emptySourceBox}>
                 <Text style={styles.emptySource}>
                   {getRuleStatusMessage(selectedRule?.name ?? '当前规则', selectedStatus)}
@@ -334,10 +359,10 @@ export function InfoScreen() {
                 ) : null}
               </View>
             ) : null}
-            {!searchLoading && selectedStatus === 'success' && selectedSources.length === 0 ? (
+            {!showGlobalSearchLoading && selectedStatus === 'success' && selectedSources.length === 0 ? (
               <Text style={styles.emptySource}>当前规则未找到匹配源</Text>
             ) : null}
-            {!searchLoading && !hasAnySuccess && installedRules.length > 0 ? (
+            {!showGlobalSearchLoading && !hasAnySuccess && !searchRunning && installedRules.length > 0 ? (
               <Text style={styles.emptyHint}>可左右切换规则查看其他来源结果</Text>
             ) : null}
           </ScrollView>

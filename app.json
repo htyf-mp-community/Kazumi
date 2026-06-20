@@ -4,8 +4,8 @@
   "htyf": {
     "type": "app",
     "entry": "./src/index.tsx",
-    "version": "1.0.0",
-    "name": "kazumi",
+    "version": "1.0.3",
+    "name": "Kazumi",
     "appid": "htyfappfdee60c7512d0b292a63f252e8e64f16",
     "rotate": "portrait",
     "appUrlConfig": "https://raw.githubusercontent.com/htyf-mp-community/demo/main/v2/plugin_kazumi/latest/app.json",

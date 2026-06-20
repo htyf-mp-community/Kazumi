@@ -5,7 +5,7 @@
  * - 现代模式：拦截 XHR/Response + 监听 video 标签 + 导航拦截 m3u8
  * - Legacy 模式：监听 iframe src，RN 侧 decodeVideoSource 解码
  *
- * 以 1×1 透明 View 挂载，resolve() 时才加载 WebView；
+ * 默认以 1×1 透明 View 挂载；resolve({ debug: true }) 时全屏显示 WebView 便于调试。
  * 通过 useImperativeHandle 暴露 VideoSniffer 接口给 CollectorProvider。
  */
 import React, {
@@ -16,7 +16,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { DEFAULT_RESOLVE_TIMEOUT_MS } from '../constants';
@@ -36,6 +36,7 @@ import {
   parseSnifferMessage,
 } from './sniffer-scripts';
 import type { VideoSniffer } from './video-sniffer-types';
+import { copyToClipboard } from '../utils';
 
 /** 进行中的嗅探任务状态（VideoSnifferHost 内部使用） */
 type PendingResolve = {
@@ -69,6 +70,7 @@ export const VideoSnifferHost = forwardRef<
   const [mounted, setMounted] = useState(false);
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
   const [userAgent, setUserAgent] = useState<string | undefined>(undefined);
+  const [debugVisible, setDebugVisible] = useState(false);
 
   useEffect(() => {
     if (active) {
@@ -93,6 +95,7 @@ export const VideoSnifferHost = forwardRef<
       clearPollTimer();
       pendingRef.current = null;
       setCurrentUrl(null);
+      setDebugVisible(false);
       pending.resolve({
         url,
         offset: pending.offset,
@@ -112,12 +115,13 @@ export const VideoSnifferHost = forwardRef<
       clearPollTimer();
       pendingRef.current = null;
       setCurrentUrl(null);
+      setDebugVisible(false);
       pending.reject(error);
     },
     [clearPollTimer],
   );
 
-  /** 过滤广告 URL，现代/Legacy 模式分别校验 m3u8 或 decode iframe */
+  /** 过滤广告 URL，现代模式保持 Dart 侧 VideoBridgeDebug 的宽松接收策略。 */
   const handleCandidate = useCallback(
     (rawUrl: string, legacy: boolean) => {
       if (!pendingRef.current || !rawUrl) {
@@ -128,17 +132,18 @@ export const VideoSnifferHost = forwardRef<
       }
 
       if (legacy) {
-        const decoded = decodeVideoSource(rawUrl);
-        if (decoded !== rawUrl || /https?:\/\/.+\.(m3u8|mp4)/i.test(decoded)) {
+        const encodedUrl = encodeURI(rawUrl);
+        const decoded = decodeVideoSource(encodedUrl);
+        if (
+          decoded !== encodedUrl ||
+          /https?:\/\/.+\.(m3u8|mp4)/i.test(decoded)
+        ) {
           finishPending(decoded);
         }
         return;
       }
 
-      if (
-        rawUrl.includes('http') &&
-        (isM3u8Url(rawUrl) || /\.mp4/i.test(rawUrl))
-      ) {
+      if (rawUrl.includes('http')) {
         finishPending(rawUrl);
       }
     },
@@ -188,6 +193,17 @@ export const VideoSnifferHost = forwardRef<
     rejectPending(new VideoSourceCancelledError());
   }, [rejectPending]);
 
+  const copyUrl = useCallback(() => {
+    if (!currentUrl) {
+      return;
+    }
+    copyToClipboard(currentUrl);
+  }, [currentUrl]);
+
+  const closeDebug = useCallback(() => {
+    setDebugVisible(false);
+  }, []);
+
   /** 加载播放页并嗅探 m3u8/mp4；新 resolve 会 cancel 前一个进行中的任务 */
   const resolve = useCallback(
     (episodeUrl: string, options: ResolveVideoOptions = {}): Promise<VideoSource> => {
@@ -198,6 +214,7 @@ export const VideoSnifferHost = forwardRef<
       const timeoutMs = options.timeoutMs ?? DEFAULT_RESOLVE_TIMEOUT_MS;
 
       setUserAgent(options.userAgent);
+      setDebugVisible(options.debug ?? false);
       setCurrentUrl(episodeUrl);
 
       return new Promise<VideoSource>((resolvePromise, rejectPromise) => {
@@ -253,7 +270,23 @@ export const VideoSnifferHost = forwardRef<
   }
 
   return (
-    <View style={styles.host} pointerEvents="none">
+    <View
+      style={debugVisible ? styles.hostDebug : styles.host}
+      pointerEvents={debugVisible ? 'auto' : 'none'}
+    >
+      {debugVisible ? (
+        <View style={styles.debugBar}>
+          <Text style={styles.debugUrl} numberOfLines={1}>
+            {currentUrl}
+          </Text>
+          <Pressable style={styles.closeBtn} onPress={copyUrl}>
+            <Text style={styles.closeBtnText}>复制</Text>
+          </Pressable>
+          <Pressable style={styles.closeBtn} onPress={closeDebug}>
+            <Text style={styles.closeBtnText}>关闭</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <WebView
         ref={webViewRef}
         source={{ uri: currentUrl }}
@@ -261,6 +294,13 @@ export const VideoSnifferHost = forwardRef<
         onMessage={onMessage}
         javaScriptEnabled
         domStorageEnabled
+        injectedJavaScriptBeforeContentLoaded={
+          pendingRef.current
+            ? pendingRef.current.useLegacyParser
+              ? buildLegacyOnLoadStopScript()
+              : buildModernOnLoadStartScript()
+            : undefined
+        }
         allowsInlineMediaPlayback
         sharedCookiesEnabled
         originWhitelist={['*']}
@@ -301,7 +341,7 @@ export const VideoSnifferHost = forwardRef<
           }
           return true;
         }}
-        style={styles.webview}
+        style={debugVisible ? styles.webviewDebug : styles.webview}
       />
     </View>
   );
@@ -315,8 +355,41 @@ const styles = StyleSheet.create({
     opacity: 0,
     overflow: 'hidden',
   },
+  hostDebug: {
+    // ...StyleSheet.absoluteFill,
+    bottom: 0,
+    height: '50%',
+    zIndex: 9999,
+    backgroundColor: '#000',
+  },
+  debugBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#1a1a1a',
+  },
+  debugUrl: {
+    flex: 1,
+    color: '#aaa',
+    fontSize: 12,
+  },
+  closeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#333',
+  },
+  closeBtnText: {
+    color: '#fff',
+    fontSize: 14,
+  },
   webview: {
     width: 360,
     height: 640,
+  },
+  webviewDebug: {
+    flex: 1,
   },
 });

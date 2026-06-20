@@ -23,6 +23,7 @@
     "@react-navigation/bottom-tabs": "^7.18.2",
     "@react-navigation/native": "7.3.3",
     "@react-navigation/stack": "7.10.5",
+    "@shopify/flash-list": "^2.3.2",
     "@xmldom/xmldom": "0.8.11",
     "cheerio": "^1.2.0",
     "linkedom": "0.18.12",

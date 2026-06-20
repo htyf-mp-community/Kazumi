@@ -52,27 +52,37 @@ export class RuleEngine {
   async searchAll(
     rules: PluginRule[],
     keyword: string,
+    onResult?: (result: SearchAllResult, index: number) => void,
   ): Promise<SearchAllResult[]> {
-    const tasks = rules.map(async (rule): Promise<SearchAllResult> => {
-      try {
-        const response = await this.search(rule, keyword);
-        return {
-          pluginName: rule.name,
-          status: response.data.length > 0 ? 'success' : 'noResult',
-          response,
-        };
-      } catch (error) {
-        const name = rule.name;
-        if (error instanceof Error && error.name === 'CaptchaRequiredError') {
-          return { pluginName: name, status: 'captcha', error };
-        }
-        if (error instanceof Error && error.name === 'NoResultError') {
-          return { pluginName: name, status: 'noResult', error };
-        }
-        return { pluginName: name, status: 'error', error };
-      }
+    const tasks = rules.map(async (rule, index): Promise<SearchAllResult> => {
+      const result = await this.searchOneRule(rule, keyword);
+      onResult?.(result, index);
+      return result;
     });
     return Promise.all(tasks);
+  }
+
+  private async searchOneRule(
+    rule: PluginRule,
+    keyword: string,
+  ): Promise<SearchAllResult> {
+    try {
+      const response = await this.search(rule, keyword);
+      return {
+        pluginName: rule.name,
+        status: response.data.length > 0 ? 'success' : 'noResult',
+        response,
+      };
+    } catch (error) {
+      const name = rule.name;
+      if (error instanceof Error && error.name === 'CaptchaRequiredError') {
+        return { pluginName: name, status: 'captcha', error };
+      }
+      if (error instanceof Error && error.name === 'NoResultError') {
+        return { pluginName: name, status: 'noResult', error };
+      }
+      return { pluginName: name, status: 'error', error };
+    }
   }
 
   fetchRoads(rule: PluginRule, detailUrl: string): Promise<Road[]> {

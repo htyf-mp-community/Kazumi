@@ -50,6 +50,7 @@ export function PlayerScreen() {
       try {
         const source = await getRuleEngine().resolveVideo(rule, href, {
           timeoutMs: 45_000,
+          debug: true,
         });
         setVideoUrl(source.url);
         upsertHistory({

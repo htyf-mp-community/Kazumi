@@ -31,10 +31,12 @@ export function parseSnifferMessage(raw: string): SnifferBridgeMessage | null {
 }
 
 const BRIDGE = `
-function __kazumiPost(type, payload) {
-  if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, payload: payload }));
-  }
+if (!window.__kazumiPost) {
+  window.__kazumiPost = function(type, payload) {
+    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, payload: payload }));
+    }
+  };
 }
 `;
 
@@ -42,7 +44,10 @@ function __kazumiPost(type, payload) {
 export function buildModernOnLoadStartScript(): string {
   return `
 ${BRIDGE}
-try { __kazumiPost('log', 'BlobParser script loaded: ' + window.location.href); } catch(e) {}
+(function() {
+  if (window.__kazumiModernStartInstalled) return;
+  window.__kazumiModernStartInstalled = true;
+  try { __kazumiPost('log', 'BlobParser script loaded: ' + window.location.href); } catch(e) {}
 const _r_text = window.Response.prototype.text;
 window.Response.prototype.text = function () {
   return new Promise((resolve, reject) => {
@@ -125,6 +130,12 @@ function setupIframeListeners() {
   });
   if (document.body) {
     observer.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+    });
   }
 }
 if (document.readyState === 'loading') {
@@ -132,6 +143,7 @@ if (document.readyState === 'loading') {
 } else {
   setupIframeListeners();
 }
+})();
 true;
 `;
 }
@@ -140,7 +152,10 @@ true;
 export function buildModernOnLoadStopScript(): string {
   return `
 ${BRIDGE}
-__kazumiPost('log', 'VideoTagParser script loaded: ' + window.location.href);
+(function() {
+  if (window.__kazumiModernStopInstalled) return;
+  window.__kazumiModernStopInstalled = true;
+  __kazumiPost('log', 'VideoTagParser script loaded: ' + window.location.href);
 const _observer = new MutationObserver((mutations) => {
   __kazumiPost('log', 'Scanning for video elements...');
   for (const mutation of mutations) {
@@ -191,6 +206,7 @@ if (document.readyState === 'loading') {
 } else {
   setupVideoProcessing();
 }
+})();
 true;
 `;
 }
@@ -199,7 +215,10 @@ true;
 export function buildLegacyOnLoadStopScript(): string {
   return `
 ${BRIDGE}
-__kazumiPost('log', 'JSBridgeDebug script loaded: ' + window.location.href);
+(function() {
+  if (window.__kazumiLegacyStopInstalled) return;
+  window.__kazumiLegacyStopInstalled = true;
+  __kazumiPost('log', 'JSBridgeDebug script loaded: ' + window.location.href);
 function processIframeElement(iframe) {
   let src = iframe.getAttribute('src');
   if (src) __kazumiPost('legacy', src);
@@ -217,6 +236,7 @@ const _observer = new MutationObserver((mutations) => {
   });
 });
 _observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+})();
 true;
 `;
 }
