@@ -125,26 +125,49 @@ export const VideoSnifferHost = forwardRef<
   const handleCandidate = useCallback(
     (rawUrl: string, legacy: boolean) => {
       if (!pendingRef.current || !rawUrl) {
+        console.log('[VideoSniffer][candidate][ignored:no-pending]', {
+          legacy,
+          rawUrl,
+        });
         return;
       }
       if (isAdUrl(rawUrl)) {
+        console.log('[VideoSniffer][candidate][ignored:ad]', {
+          legacy,
+          rawUrl,
+        });
         return;
       }
 
       if (legacy) {
         const encodedUrl = encodeURI(rawUrl);
         const decoded = decodeVideoSource(encodedUrl);
+        console.log('[VideoSniffer][candidate][legacy]', {
+          rawUrl,
+          encodedUrl,
+          decoded,
+        });
         if (
           decoded !== encodedUrl ||
           /https?:\/\/.+\.(m3u8|mp4)/i.test(decoded)
         ) {
+          console.log('[VideoSniffer][candidate][accepted]', decoded);
           finishPending(decoded);
+        } else {
+          console.log('[VideoSniffer][candidate][ignored:decode-unchanged]', {
+            rawUrl,
+            encodedUrl,
+            decoded,
+          });
         }
         return;
       }
 
       if (rawUrl.includes('http')) {
+        console.log('[VideoSniffer][candidate][accepted]', rawUrl);
         finishPending(rawUrl);
+      } else {
+        console.log('[VideoSniffer][candidate][ignored:not-http]', rawUrl);
       }
     },
     [finishPending],
@@ -173,13 +196,22 @@ export const VideoSnifferHost = forwardRef<
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
+      console.log('[VideoSniffer][message][raw]', event.nativeEvent.data);
       const message = parseSnifferMessage(event.nativeEvent.data);
       if (!message) {
+        console.warn(
+          '[VideoSniffer][message][ignored:malformed]',
+          event.nativeEvent.data,
+        );
         return;
       }
-      if (message.type === 'video') {
+      if (message.type === 'log') {
+        console.log('[VideoSniffer][webview]', message.payload);
+      } else if (message.type === 'video') {
+        console.log('[VideoSniffer][message][video]', message.payload);
         handleCandidate(message.payload, false);
       } else if (message.type === 'legacy') {
+        console.log('[VideoSniffer][message][legacy]', message.payload);
         handleCandidate(message.payload, true);
       }
     },
@@ -301,41 +333,58 @@ export const VideoSnifferHost = forwardRef<
               : buildModernOnLoadStartScript()
             : undefined
         }
+        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
+        injectedJavaScriptForMainFrameOnly={false}
         allowsInlineMediaPlayback
         sharedCookiesEnabled
         originWhitelist={['*']}
-        onLoadStart={() => {
+        onLoadStart={(event) => {
+          console.log(
+            '[VideoSniffer][webview][load-start]',
+            event.nativeEvent.url,
+          );
           const pending = pendingRef.current;
           if (!pending) {
+            console.log('[VideoSniffer][webview][load-start][no-pending]');
             return;
           }
           if (!pending.useLegacyParser) {
             injectScripts(false, 'start');
           }
         }}
-        onLoadEnd={() => {
+        onLoadEnd={(event) => {
+          console.log(
+            '[VideoSniffer][webview][load-end]',
+            event.nativeEvent.url,
+          );
           const pending = pendingRef.current;
           if (!pending) {
+            console.log('[VideoSniffer][webview][load-end][no-pending]');
             return;
           }
           injectScripts(pending.useLegacyParser, 'stop');
         }}
-        onError={() => {
+        onError={(event) => {
+          console.warn('[VideoSniffer][webview][load-error]', event.nativeEvent);
           rejectPending(new VideoSourceNotFoundError('WebView load error'));
         }}
-        onHttpError={() => {
+        onHttpError={(event) => {
+          console.warn('[VideoSniffer][webview][http-error]', event.nativeEvent);
           rejectPending(new VideoSourceNotFoundError('WebView HTTP error'));
         }}
         onShouldStartLoadWithRequest={(request) => {
+          console.log('[VideoSniffer][request]', request);
           const pending = pendingRef.current;
           if (!pending || pending.useLegacyParser) {
             return true;
           }
           const lower = request.url.toLowerCase();
           if (isAdUrl(lower)) {
+            console.log('[VideoSniffer][request][blocked:ad]', request.url);
             return false;
           }
           if (isM3u8Url(request.url)) {
+            console.log('[VideoSniffer][request][accepted:m3u8]', request.url);
             finishPending(request.url);
             return false;
           }

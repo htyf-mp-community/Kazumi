@@ -31,12 +31,55 @@ export function parseSnifferMessage(raw: string): SnifferBridgeMessage | null {
 }
 
 const BRIDGE = `
+if (!window.__kazumiFormatLogArgs) {
+  window.__kazumiFormatLogArgs = function(args) {
+    return Array.prototype.map.call(args, function(arg) {
+      if (typeof arg === 'string') return arg;
+      if (arg instanceof Error) return arg.stack || arg.message;
+      try {
+        return JSON.stringify(arg);
+      } catch (e) {
+        return String(arg);
+      }
+    }).join(' ');
+  };
+}
+if (!window.__kazumiOriginalConsole) {
+  window.__kazumiOriginalConsole = {};
+  ['log', 'info', 'warn', 'error', 'debug'].forEach(function(method) {
+    var original = console && console[method];
+    window.__kazumiOriginalConsole[method] =
+      typeof original === 'function' ? original.bind(console) : function() {};
+  });
+}
 if (!window.__kazumiPost) {
   window.__kazumiPost = function(type, payload) {
+    try {
+      window.__kazumiOriginalConsole.log('[KazumiSniffer][' + type + ']', payload);
+    } catch (e) {}
     if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, payload: payload }));
     }
   };
+}
+if (!window.__kazumiConsolePatched) {
+  window.__kazumiConsolePatched = true;
+  ['log', 'info', 'warn', 'error', 'debug'].forEach(function(method) {
+    console[method] = function() {
+      var message = window.__kazumiFormatLogArgs(arguments);
+      try {
+        window.__kazumiOriginalConsole[method].apply(console, arguments);
+      } catch (e) {}
+      try {
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'log',
+            payload: '[console.' + method + '] ' + message
+          }));
+        }
+      } catch (e) {}
+    };
+  });
 }
 `;
 
@@ -77,40 +120,71 @@ window.XMLHttpRequest.prototype.open = function (...args) {
 
 function injectIntoIframe(iframe) {
   try {
+    __kazumiPost('log', 'Injecting into iframe: ' + (iframe.src || iframe.getAttribute('src') || '<empty src>'));
     const iframeWindow = iframe.contentWindow;
-    if (!iframeWindow) return;
+    if (!iframeWindow) {
+      __kazumiPost('log', 'Iframe inject skipped: contentWindow is empty');
+      return;
+    }
+    if (!iframeWindow.Response || !iframeWindow.Response.prototype || !iframeWindow.Response.prototype.text) {
+      __kazumiPost('log', 'Iframe inject skipped: Response.prototype.text is unavailable');
+      return;
+    }
+    if (!iframeWindow.XMLHttpRequest || !iframeWindow.XMLHttpRequest.prototype || !iframeWindow.XMLHttpRequest.prototype.open) {
+      __kazumiPost('log', 'Iframe inject skipped: XMLHttpRequest.prototype.open is unavailable');
+      return;
+    }
+    if (iframeWindow.__kazumiIframeNetworkInstalled) {
+      __kazumiPost('log', 'Iframe inject skipped: already installed');
+      return;
+    }
+    iframeWindow.__kazumiIframeNetworkInstalled = true;
     const iframe_r_text = iframeWindow.Response.prototype.text;
+    __kazumiPost('log', 'Iframe response prototype text: ');
     iframeWindow.Response.prototype.text = function () {
       return new Promise((resolve, reject) => {
+        __kazumiPost('log', 'Calling iframe response prototype text: ' + (this && this.url ? this.url : '<unknown url>'));
         iframe_r_text.call(this).then((text) => {
           resolve(text);
+          __kazumiPost('log', 'Iframe response text resolved, length: ' + text.length + ', url: ' + (this && this.url ? this.url : '<unknown url>'));
           if (text.trim().startsWith("#EXTM3U")) {
             __kazumiPost('log', 'M3U8 source found in iframe: ' + this.url);
             __kazumiPost('video', this.url);
           }
-        }).catch(reject);
+        }).catch((error) => {
+          __kazumiPost('log', 'Iframe response text failed: ' + (error && (error.stack || error.message) || error));
+          reject(error);
+        });
       });
     };
     const iframe_open = iframeWindow.XMLHttpRequest.prototype.open;
+    __kazumiPost('log', 'Iframe XMLHttpRequest prototype open: ');
     iframeWindow.XMLHttpRequest.prototype.open = function (...args) {
+      __kazumiPost('log', 'Iframe XHR opened: ' + args[1]);
       this.addEventListener("load", () => {
         try {
           let content = this.responseText;
+          __kazumiPost('log', 'Iframe XHR loaded, length: ' + content.length + ', url: ' + args[1]);
           if (content.trim().startsWith("#EXTM3U") && args[1] != null) {
             __kazumiPost('log', 'M3U8 source found in iframe: ' + args[1]);
             __kazumiPost('video', args[1]);
           }
-        } catch {}
+        } catch (error) {
+          __kazumiPost('log', 'Iframe XHR load inspect failed: ' + (error && (error.stack || error.message) || error));
+        }
       });
       return iframe_open.apply(this, args);
     };
-  } catch (e) {}
+    __kazumiPost('log', 'Iframe network hooks installed: ' + (iframe.src || iframe.getAttribute('src') || '<empty src>'));
+  } catch (error) {
+    __kazumiPost('log', 'Iframe inject failed: ' + (error && (error.stack || error.message) || error));
+  }
 }
 
 function setupIframeListeners() {
   document.querySelectorAll('iframe').forEach(iframe => {
     if (iframe.contentDocument) injectIntoIframe(iframe);
-    iframe.addEventListener('load', () => injectIntoIframe(iframe));
+    // iframe.addEventListener('load', () => injectIntoIframe(iframe));
   });
   const observer = new MutationObserver(mutations => {
     mutations.forEach(mutation => {
