@@ -1,42 +1,5 @@
+import { useBangumiProxyStore, type BangumiMirror } from '@/stores/bangumi-proxy-store';
 import { parseBangumiItem, type BangumiItem } from '@/types/bangumi';
-
-const BANGUMI_NEXT = [
-  {
-    url: 'https://next.bangumi.lol',
-    headers: {
-      'Accept': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-    },
-  }, 
-  {
-    url: 'https://next.bgm.tv',
-    headers: {
-      'Accept': 'application/json',
-      'User-Agent': 'Predidit/Kazumi/2.1.6 (Android) (https://github.com/Predidit/Kazumi)',
-    },
-  }
-];
-const BANGUMI_API = [
-  {
-    url: 'https://api.bangumi.lol',
-    headers: {
-      'Accept': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-    },
-  },
-  {
-    url: 'https://api.bgm.tv',
-    headers: {
-      'Accept': 'application/json',
-      'User-Agent': 'Predidit/Kazumi/2.1.6 (Android) (https://github.com/Predidit/Kazumi)',
-    },
-  }
-];
-
-type BangumiMirror = {
-  url: string;
-  headers: Record<string, string>;
-};
 
 /**
  * 从镜像列表中获取数据
@@ -83,7 +46,7 @@ export async function fetchTrendingSubjects(
   type = 2,
 ): Promise<BangumiItem[]> {
   const response = await fetchFromMirrors(
-    BANGUMI_NEXT,
+    useBangumiProxyStore.getState().getNextMirrors(),
     `/p1/trending/subjects?type=${type}&limit=${limit}&offset=${offset}`,
   );
   const json = (await response.json()) as { data?: Array<{ subject?: Record<string, unknown> }> };
@@ -98,7 +61,10 @@ export async function fetchTrendingSubjects(
  * @returns 每日放送
  */
 export async function fetchCalendar(): Promise<BangumiItem[][]> {
-  const response = await fetchFromMirrors(BANGUMI_NEXT, '/p1/calendar');
+  const response = await fetchFromMirrors(
+    useBangumiProxyStore.getState().getNextMirrors(),
+    '/p1/calendar',
+  );
   const json = (await response.json()) as Record<string, Array<{ subject?: Record<string, unknown> }>>;
   const calendar: BangumiItem[][] = [];
   for (let weekday = 1; weekday <= 7; weekday += 1) {
@@ -130,7 +96,7 @@ export async function searchBangumiSubjects(
     return [];
   }
   const response = await fetchFromMirrors(
-    BANGUMI_API,
+    useBangumiProxyStore.getState().getApiMirrors(),
     `/v0/search/subjects?type=2&limit=${limit}&offset=${offset}`,
     {
       method: 'POST',
@@ -149,7 +115,10 @@ export async function searchBangumiSubjects(
  * @returns 番剧详情
  */
 export async function fetchBangumiSubject(id: number): Promise<BangumiItem> {
-  const response = await fetchFromMirrors(BANGUMI_NEXT, `/p1/subjects/${id}`);
+  const response = await fetchFromMirrors(
+    useBangumiProxyStore.getState().getNextMirrors(),
+    `/p1/subjects/${id}`,
+  );
   const json = (await response.json()) as Record<string, unknown>;
   return parseBangumiItem(json);
 }

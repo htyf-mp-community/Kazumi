@@ -7,6 +7,7 @@ import { HistoryScreen } from '@/screens/HistoryScreen';
 import { InfoScreen } from '@/screens/InfoScreen';
 import { PlayerScreen } from '@/screens/PlayerScreen';
 import { PluginEditorScreen } from '@/screens/PluginEditorScreen';
+import { BangumiProxyScreen } from '@/screens/BangumiProxyScreen';
 import { PluginManageScreen } from '@/screens/PluginManageScreen';
 import { PluginTestScreen } from '@/screens/PluginTestScreen';
 import { SearchScreen } from '@/screens/SearchScreen';
@@ -27,6 +28,7 @@ export function RootNavigator() {
         <Stack.Screen name="History" component={HistoryScreen} />
         <Stack.Screen name="Info" component={InfoScreen} />
         <Stack.Screen name="PluginManage" component={PluginManageScreen} />
+        <Stack.Screen name="BangumiProxy" component={BangumiProxyScreen} />
         <Stack.Screen name="PluginEditor" component={PluginEditorScreen} />
         <Stack.Screen name="PluginTest" component={PluginTestScreen} />
         <Stack.Screen

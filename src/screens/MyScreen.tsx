@@ -28,7 +28,7 @@ export function MyScreen() {
           <SettingsItem
             title="bgm.tv反代"
             description="反代bgm.tv的API请求"
-            onPress={() => navigation.navigate('PluginManage')}
+            onPress={() => navigation.navigate('BangumiProxy')}
           />
         </SettingsGroup>
         <SettingsGroup title="关于">

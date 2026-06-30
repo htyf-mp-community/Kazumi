@@ -16,6 +16,7 @@ export type RootStackParamList = {
   History: undefined;
   Info: { bangumi: BangumiItem };
   PluginManage: undefined;
+  BangumiProxy: undefined;
   PluginEditor: { rule: PluginRule; previousName?: string };
   PluginTest: { rule: PluginRule };
   Player: {
