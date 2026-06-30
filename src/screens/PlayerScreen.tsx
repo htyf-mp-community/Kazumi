@@ -48,6 +48,7 @@ export function PlayerScreen() {
       setResolving(true);
       setVideoUrl('');
       try {
+        console.error('href', href)
         const source = await getRuleEngine().resolveVideo(rule, href, {
           timeoutMs: 45_000,
           debug: true,
@@ -64,7 +65,7 @@ export function PlayerScreen() {
           progressMs: 0,
         });
       } catch (error) {
-        Alert.alert('嗅探失败', String(error));
+        // Alert.alert('嗅探失败', String(error));
       } finally {
         setResolving(false);
       }

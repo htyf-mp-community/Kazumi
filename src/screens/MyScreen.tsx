@@ -25,6 +25,11 @@ export function MyScreen() {
             description="管理番剧资源规则"
             onPress={() => navigation.navigate('PluginManage')}
           />
+          <SettingsItem
+            title="bgm.tv反代"
+            description="反代bgm.tv的API请求"
+            onPress={() => navigation.navigate('PluginManage')}
+          />
         </SettingsGroup>
         <SettingsGroup title="关于">
           <SettingsItem

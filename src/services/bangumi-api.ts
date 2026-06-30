@@ -1,36 +1,65 @@
 import { parseBangumiItem, type BangumiItem } from '@/types/bangumi';
 
 const BANGUMI_NEXT = [
-  'https://next.bangumi.one',
-  'https://next.bgm.tv',
+  {
+    url: 'https://next.bangumi.lol',
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
+    },
+  }, 
+  {
+    url: 'https://next.bgm.tv',
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'Predidit/Kazumi/2.1.6 (Android) (https://github.com/Predidit/Kazumi)',
+    },
+  }
 ];
-const BANGUMI_V0 = [
-  'https://api.bangumi.one/v0',
-  'https://api.bgm.tv/v0',
+const BANGUMI_API = [
+  {
+    url: 'https://api.bangumi.lol',
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
+    },
+  },
+  {
+    url: 'https://api.bgm.tv',
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'Predidit/Kazumi/2.1.6 (Android) (https://github.com/Predidit/Kazumi)',
+    },
+  }
 ];
 
-const DEFAULT_HEADERS = {
-  Accept: 'application/json',
-  'User-Agent': 'Predidit/Kazumi/2.1.6 (Android) (https://github.com/Predidit/Kazumi)',
+type BangumiMirror = {
+  url: string;
+  headers: Record<string, string>;
 };
 
 /**
  * 从镜像列表中获取数据
- * @param bases 镜像列表
+ * @param mirrors 镜像列表
  * @param path 路径
- * @param init 请求头
- * @returns 
+ * @param init 额外请求配置（headers 会与镜像 headers 合并）
  */
 async function fetchFromMirrors(
-  bases: readonly string[],
+  mirrors: readonly BangumiMirror[],
   path: string,
   init?: RequestInit,
 ): Promise<Response> {
   let lastError: Error | null = null;
-  for (const base of bases) {
-    const url = `${base.replace(/\/+$/, '')}${path}`;
+  for (const mirror of mirrors) {
+    const url = `${mirror.url.replace(/\/+$/, '')}${path}`;
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, {
+        ...init,
+        headers: {
+          ...mirror.headers,
+          ...(init?.headers as Record<string, string> | undefined),
+        },
+      });
       if (response.ok) {
         return response;
       }
@@ -56,10 +85,8 @@ export async function fetchTrendingSubjects(
   const response = await fetchFromMirrors(
     BANGUMI_NEXT,
     `/p1/trending/subjects?type=${type}&limit=${limit}&offset=${offset}`,
-    { headers: DEFAULT_HEADERS },
   );
   const json = (await response.json()) as { data?: Array<{ subject?: Record<string, unknown> }> };
-  console.log(json.data)
   return (json.data ?? [])
     .map((entry) => entry.subject)
     .filter((item): item is Record<string, unknown> => !!item)
@@ -71,9 +98,7 @@ export async function fetchTrendingSubjects(
  * @returns 每日放送
  */
 export async function fetchCalendar(): Promise<BangumiItem[][]> {
-  const response = await fetchFromMirrors(BANGUMI_NEXT, '/p1/calendar', {
-    headers: DEFAULT_HEADERS,
-  });
+  const response = await fetchFromMirrors(BANGUMI_NEXT, '/p1/calendar');
   const json = (await response.json()) as Record<string, Array<{ subject?: Record<string, unknown> }>>;
   const calendar: BangumiItem[][] = [];
   for (let weekday = 1; weekday <= 7; weekday += 1) {
@@ -105,14 +130,11 @@ export async function searchBangumiSubjects(
     return [];
   }
   const response = await fetchFromMirrors(
-    BANGUMI_V0,
-    `/search/subjects?type=2&limit=${limit}&offset=${offset}`,
+    BANGUMI_API,
+    `/v0/search/subjects?type=2&limit=${limit}&offset=${offset}`,
     {
       method: 'POST',
-      headers: {
-        ...DEFAULT_HEADERS,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keyword: trimmed }),
     },
   );
@@ -127,9 +149,7 @@ export async function searchBangumiSubjects(
  * @returns 番剧详情
  */
 export async function fetchBangumiSubject(id: number): Promise<BangumiItem> {
-  const response = await fetchFromMirrors(BANGUMI_NEXT, `/p1/subjects/${id}`, {
-    headers: DEFAULT_HEADERS,
-  });
+  const response = await fetchFromMirrors(BANGUMI_NEXT, `/p1/subjects/${id}`);
   const json = (await response.json()) as Record<string, unknown>;
   return parseBangumiItem(json);
 }

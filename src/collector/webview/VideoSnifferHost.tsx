@@ -333,8 +333,8 @@ export const VideoSnifferHost = forwardRef<
               : buildModernOnLoadStartScript()
             : undefined
         }
-        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
-        injectedJavaScriptForMainFrameOnly={false}
+        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={true}
+        injectedJavaScriptForMainFrameOnly={true}
         allowsInlineMediaPlayback
         sharedCookiesEnabled
         originWhitelist={['*']}
@@ -372,24 +372,7 @@ export const VideoSnifferHost = forwardRef<
           console.warn('[VideoSniffer][webview][http-error]', event.nativeEvent);
           rejectPending(new VideoSourceNotFoundError('WebView HTTP error'));
         }}
-        onShouldStartLoadWithRequest={(request) => {
-          console.log('[VideoSniffer][request]', request);
-          const pending = pendingRef.current;
-          if (!pending || pending.useLegacyParser) {
-            return true;
-          }
-          const lower = request.url.toLowerCase();
-          if (isAdUrl(lower)) {
-            console.log('[VideoSniffer][request][blocked:ad]', request.url);
-            return false;
-          }
-          if (isM3u8Url(request.url)) {
-            console.log('[VideoSniffer][request][accepted:m3u8]', request.url);
-            finishPending(request.url);
-            return false;
-          }
-          return true;
-        }}
+        
         style={debugVisible ? styles.webviewDebug : styles.webview}
       />
     </View>
