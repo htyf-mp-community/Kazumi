@@ -119,6 +119,7 @@ ${BRIDGE}
     return _fetch.apply(this, args);
   };
 
+  // 测试用
   fetch('https://jsonplaceholder.typicode.com/todos/1').then(response => response.text()).then(text => {
     __kazumiPost('log', 'fetch text: ' + text);
   }).catch(error => {
