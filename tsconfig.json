@@ -6,6 +6,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["**/*.ts", "**/*.tsx", "src/collector/webview/d.js"],
   "exclude": ["**/node_modules", "**/Pods"]
 }

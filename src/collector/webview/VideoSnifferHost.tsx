@@ -213,6 +213,9 @@ export const VideoSnifferHost = forwardRef<
       } else if (message.type === 'legacy') {
         console.log('[VideoSniffer][message][legacy]', message.payload);
         handleCandidate(message.payload, true);
+      } else if (message.type === 'iframe') {
+        console.log('[VideoSniffer][message][iframe]', message.payload);
+       
       }
     },
     [handleCandidate],
@@ -333,8 +336,8 @@ export const VideoSnifferHost = forwardRef<
               : buildModernOnLoadStartScript()
             : undefined
         }
-        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={true}
-        injectedJavaScriptForMainFrameOnly={true}
+        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
+        injectedJavaScriptForMainFrameOnly={false}
         allowsInlineMediaPlayback
         sharedCookiesEnabled
         originWhitelist={['*']}
