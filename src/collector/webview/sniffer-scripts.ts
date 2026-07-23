@@ -200,7 +200,11 @@ ${BRIDGE}
   }, 4000);
 
   function injectIntoIframe(iframe) {
-    if (iframe.src && iframe.src.trim() !== 'about:blank') {
+    if (iframe.src && iframe.src.trim() !== 'about:blank'
+     && iframe.src.indexOf('googleads') === -1 && iframe.src.indexOf('google.com') === -1
+     && !iframe.src.startsWith(window.location.origin)
+    ) {
+      alert(123)
       window.__kazumiPost('iframe', {
         url: iframe.src,
         header: {

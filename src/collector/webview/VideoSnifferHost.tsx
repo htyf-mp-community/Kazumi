@@ -38,6 +38,13 @@ import {
 import type { VideoSniffer } from './video-sniffer-types';
 import { copyToClipboard } from '../utils';
 
+/** iframe 子 WebView 嗅探目标 */
+type IframeSnifferTarget = {
+  id: string;
+  url: string;
+  headers: Record<string, string>;
+};
+
 /** 进行中的嗅探任务状态（VideoSnifferHost 内部使用） */
 type PendingResolve = {
   /** 传给 VideoSource.offset 的多源偏移 */
@@ -65,10 +72,15 @@ export const VideoSnifferHost = forwardRef<
   VideoSnifferHostProps
 >(function VideoSnifferHost({ active = false }, ref) {
   const webViewRef = useRef<WebView>(null);
+  const iframeWebViewRefs = useRef<Map<string, WebView>>(new Map());
+  const seenIframeUrlsRef = useRef<Set<string>>(new Set());
   const pendingRef = useRef<PendingResolve | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [mounted, setMounted] = useState(false);
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
+  const [iframeSniffers, setIframeSniffers] = useState<IframeSnifferTarget[]>(
+    [],
+  );
   const [userAgent, setUserAgent] = useState<string | undefined>(undefined);
   const [debugVisible, setDebugVisible] = useState(false);
 
@@ -85,6 +97,55 @@ export const VideoSnifferHost = forwardRef<
     }
   }, []);
 
+  const clearIframeSniffers = useCallback(() => {
+    setIframeSniffers([]);
+    seenIframeUrlsRef.current.clear();
+    iframeWebViewRefs.current.clear();
+  }, []);
+
+  const isSniffableIframeUrl = useCallback((url: string) => {
+    if (!url || url.trim() === '' || url.startsWith('about:blank')) {
+      return false;
+    }
+    if (isAdUrl(url)) {
+      return false;
+    }
+    const lower = url.toLowerCase();
+    return (
+      !lower.includes('prestrain.html') && !lower.includes('prestrain%2ehtml')
+    );
+  }, []);
+
+  const setIframeWebViewRef = useCallback((id: string, ref: WebView | null) => {
+    if (ref) {
+      iframeWebViewRefs.current.set(id, ref);
+      return;
+    }
+    iframeWebViewRefs.current.delete(id);
+  }, []);
+
+  const spawnIframeSniffer = useCallback(
+    (payload: { url: string; header: Record<string, string> }) => {
+      if (!pendingRef.current) {
+        return;
+      }
+      const { url, header } = payload;
+      if (!isSniffableIframeUrl(url)) {
+        console.log('[VideoSniffer][iframe][ignored:filtered]', url);
+        return;
+      }
+      if (seenIframeUrlsRef.current.has(url)) {
+        console.log('[VideoSniffer][iframe][ignored:duplicate]', url);
+        return;
+      }
+      seenIframeUrlsRef.current.add(url);
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      console.log('[VideoSniffer][iframe][spawn]', { id, url, header });
+      setIframeSniffers((prev) => [...prev, { id, url, headers: header }]);
+    },
+    [isSniffableIframeUrl],
+  );
+
   const finishPending = useCallback(
     (url: string) => {
       const pending = pendingRef.current;
@@ -93,6 +154,7 @@ export const VideoSnifferHost = forwardRef<
       }
       clearTimeout(pending.timeoutId);
       clearPollTimer();
+      clearIframeSniffers();
       pendingRef.current = null;
       setCurrentUrl(null);
       setDebugVisible(false);
@@ -102,7 +164,7 @@ export const VideoSnifferHost = forwardRef<
         type: 'online',
       });
     },
-    [clearPollTimer],
+    [clearIframeSniffers, clearPollTimer],
   );
 
   const rejectPending = useCallback(
@@ -113,12 +175,13 @@ export const VideoSnifferHost = forwardRef<
       }
       clearTimeout(pending.timeoutId);
       clearPollTimer();
+      clearIframeSniffers();
       pendingRef.current = null;
       setCurrentUrl(null);
       setDebugVisible(false);
       pending.reject(error);
     },
-    [clearPollTimer],
+    [clearIframeSniffers, clearPollTimer],
   );
 
   /** 过滤广告 URL，现代模式保持 Dart 侧 VideoBridgeDebug 的宽松接收策略。 */
@@ -174,28 +237,41 @@ export const VideoSnifferHost = forwardRef<
   );
 
   const injectScripts = useCallback(
-    (legacy: boolean, phase: 'start' | 'stop' | 'poll') => {
-      if (phase === 'start' && !legacy) {
-        webViewRef.current?.injectJavaScript(buildModernOnLoadStartScript());
-        return;
-      }
-      if (phase === 'stop') {
-        webViewRef.current?.injectJavaScript(
-          legacy
-            ? buildLegacyOnLoadStopScript()
-            : buildModernOnLoadStopScript(),
+    (legacy: boolean, phase: 'start' | 'stop' | 'poll', target?: WebView) => {
+      const inject = (webView: WebView | null | undefined) => {
+        if (!webView) {
+          return;
+        }
+        if (phase === 'start' && !legacy) {
+          webView.injectJavaScript(buildModernOnLoadStartScript());
+          return;
+        }
+        if (phase === 'stop') {
+          webView.injectJavaScript(
+            legacy
+              ? buildLegacyOnLoadStopScript()
+              : buildModernOnLoadStopScript(),
+          );
+          return;
+        }
+        webView.injectJavaScript(
+          legacy ? buildLegacyPollScript() : buildModernPollScript(),
         );
+      };
+
+      if (target) {
+        inject(target);
         return;
       }
-      webViewRef.current?.injectJavaScript(
-        legacy ? buildLegacyPollScript() : buildModernPollScript(),
-      );
+
+      inject(webViewRef.current);
+      iframeWebViewRefs.current.forEach((webView) => inject(webView));
     },
     [],
   );
 
   const onMessage = useCallback(
-    (event: WebViewMessageEvent) => {
+    (event: WebViewMessageEvent, isIframe: boolean = false) => {
       console.log('[VideoSniffer][message][raw]', event.nativeEvent.data);
       const message = parseSnifferMessage(event.nativeEvent.data);
       if (!message) {
@@ -214,11 +290,13 @@ export const VideoSnifferHost = forwardRef<
         console.log('[VideoSniffer][message][legacy]', message.payload);
         handleCandidate(message.payload, true);
       } else if (message.type === 'iframe') {
-        console.log('[VideoSniffer][message][iframe]', message.payload);
-       
+        if (!isIframe) {
+          console.log('[VideoSniffer][message][iframe]', message.payload);
+          spawnIframeSniffer(message.payload);
+        }
       }
     },
-    [handleCandidate],
+    [handleCandidate, spawnIframeSniffer],
   );
 
   const cancel = useCallback(() => {
@@ -256,9 +334,11 @@ export const VideoSnifferHost = forwardRef<
         if (pendingRef.current) {
           clearTimeout(pendingRef.current.timeoutId);
           clearPollTimer();
+          clearIframeSniffers();
           pendingRef.current.reject(new VideoSourceCancelledError());
           pendingRef.current = null;
         }
+        seenIframeUrlsRef.current.clear();
 
         const timeoutId = setTimeout(() => {
           rejectPending(new VideoSourceTimeoutError(timeoutMs));
@@ -278,7 +358,7 @@ export const VideoSnifferHost = forwardRef<
         }, 1000);
       });
     },
-    [clearPollTimer, injectScripts, rejectPending],
+    [clearIframeSniffers, clearPollTimer, injectScripts, rejectPending],
   );
 
   useImperativeHandle(
@@ -295,10 +375,11 @@ export const VideoSnifferHost = forwardRef<
       if (pendingRef.current) {
         clearTimeout(pendingRef.current.timeoutId);
         clearPollTimer();
+        clearIframeSniffers();
         pendingRef.current = null;
       }
     };
-  }, [clearPollTimer]);
+  }, [clearIframeSniffers, clearPollTimer]);
 
   if (!mounted || !currentUrl) {
     return null;
@@ -378,6 +459,64 @@ export const VideoSnifferHost = forwardRef<
         
         style={debugVisible ? styles.webviewDebug : styles.webview}
       />
+      {iframeSniffers.map((target) => {
+        const iframeUserAgent =
+          target.headers['user-agent'] ?? userAgent ?? undefined;
+        const iframeHeaders: Record<string, string> = {};
+        if (target.headers.referer) {
+          iframeHeaders.Referer = target.headers.referer;
+        }
+        if (iframeUserAgent) {
+          iframeHeaders['User-Agent'] = iframeUserAgent;
+        }
+
+        return (
+          <WebView
+            key={target.id}
+            ref={(ref) => setIframeWebViewRef(target.id, ref)}
+            source={{
+              uri: target.url,
+              headers: iframeHeaders,
+            }}
+            userAgent={iframeUserAgent}
+            onMessage={(event) => {
+              console.log('[VideoSniffer][iframe-webview][message][raw]', event.nativeEvent.data);
+              onMessage(event, true);
+            }}
+            javaScriptEnabled
+            domStorageEnabled
+            injectedJavaScriptBeforeContentLoaded={buildModernOnLoadStartScript()}
+            injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
+            injectedJavaScriptForMainFrameOnly={false}
+            allowsInlineMediaPlayback
+            sharedCookiesEnabled
+            originWhitelist={['*']}
+            onLoadStart={() => {
+              console.log('[VideoSniffer][iframe-webview][load-start]', target.url);
+              injectScripts(false, 'start', iframeWebViewRefs.current.get(target.id));
+            }}
+            onLoadEnd={() => {
+              console.log('[VideoSniffer][iframe-webview][load-end]', target.url);
+              injectScripts(false, 'stop', iframeWebViewRefs.current.get(target.id));
+            }}
+            onError={(event) => {
+              console.warn(
+                '[VideoSniffer][iframe-webview][load-error]',
+                target.url,
+                event.nativeEvent,
+              );
+            }}
+            onHttpError={(event) => {
+              console.warn(
+                '[VideoSniffer][iframe-webview][http-error]',
+                target.url,
+                event.nativeEvent,
+              );
+            }}
+            style={debugVisible ? styles.webviewDebug : styles.webview}
+          />
+        );
+      })}
     </View>
   );
 });
